@@ -1,15 +1,39 @@
-[![Build Status](https://github.com/mavlink/mavlink/workflows/Test%20and%20deploy/badge.svg)](https://github.com/mavlink/mavlink/actions?query=branch%3Amaster)
+MAVLink UDP Android Example
+================
 
-## MAVLink ##
+![screenshot](screenshots/pl.bezzalogowe.mavlink_en_002.png)
 
-MAVLink -- Micro Air Vehicle Message Marshalling Library.
+This is a fork of [MAVLink UDP Example](https://github.com/mavlink/mavlink/tree/master/examples/linux) created by [Bryan Godbolt](https://github.com/godbolt), rewritten for Android using JNI. The app sends some data to QGroundControl using the MAVLink protocol.
 
-MAVLink is a very lightweight, header-only message library for communication between drones and/or ground control stations. It consists primarily of message-set specifications for different systems ("dialects") defined in XML files, and Python tools that convert these into appropriate source code for [supported languages](https://mavlink.io/en/#supported_languages). There are additional Python scripts providing examples and utilities for working with MAVLink data.
+ - Open `local.properties` and edit `sdk.dir` and `ndk.dir` properties (paths to your Android SDK and [NDK](https://developer.android.com/ndk/downloads)):
 
-> **Tip** MAVLink is very well suited for applications with very limited communication bandwidth. Its reference implementation in C is highly optimized for resource-constrained systems with limited RAM and flash memory. It is field-proven and deployed in many products where it serves as interoperability interface between components of different manufacturers.
+```
+  ndk.dir=~/Library/Android/android-sdk-linux/ndk-bundle
+  sdk.dir=~/Library/Android/android-sdk-linux
+```
 
-Key Links:
-* [Documentation/Website](https://mavlink.io/en/) (mavlink.io/en/)
-* [Discussion/Support](https://mavlink.io/en/#support) (Slack)
-* [Contributing](https://mavlink.io/en/contributing/contributing.html)
-* [License](https://mavlink.io/en/#license)
+ - Download: [c_library_v2](https://github.com/mavlink/c_library_v2) or generate: [generate_libraries](https://mavlink.io/en/getting_started/generate_libraries.html) MAVLink headers.
+
+ - Open `/mavlink-udp/src/main/cpp/Android.mk` and edit `LOCAL_CFLAGS` variable so that it points to the folder where you keep the headers.
+
+```
+LOCAL_PATH := $(call my-dir)
+
+include $(CLEAR_VARS)
+LOCAL_CFLAGS += -I ~/mavlink/generated/include
+LOCAL_MODULE    := mavlink_udp
+LOCAL_SRC_FILES := mavlink_udp.c
+include $(BUILD_SHARED_LIBRARY)
+```
+
+ - If you're having trouble building the project (`The system cannot find the file specified`) - try downloading [older NDK version](https://developer.android.com/ndk/downloads/older_releases#ndk-16b-downloads).
+
+`system_id` and `component_id` values are both set to 1 by default, but can be set by the user.
+
+Latest build of the app can be downloaded here: [mavlink-udp-debug.apk](https://github.com/mareksuma1985/mavlink/blob/master/examples/android/mavlink-udp/build/outputs/apk/debug/mavlink-udp-debug.apk).
+
+To establish connection check your Android device's IP address and add target host in QGroundControl:
+![screenshot](screenshots/pl.bezzalogowe.mavlink_en_003.png)
+
+Start UDP server in the app and it will start sending heartbeat, attitude, location and battery status:
+![screenshot](screenshots/pl.bezzalogowe.mavlink_en_004.png)
