@@ -38,7 +38,9 @@ public class UpdateTextThread implements Runnable {
         }
     }
 
-    /** https://medium.com/@ssaurel/create-a-blink-effect-on-android-3c76b5e0e36b */
+    /**
+     * https://medium.com/@ssaurel/create-a-blink-effect-on-android-3c76b5e0e36b
+     */
     private void manageBlinkEffect() {
 /* Ground station sends messages with the same content,
    a blink emphasizes that it's a new message. */

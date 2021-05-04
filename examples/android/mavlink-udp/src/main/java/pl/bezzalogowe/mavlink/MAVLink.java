@@ -19,9 +19,11 @@ public class MAVLink {
     public native int setIDs(byte system, byte component);
 
     public native int receiveInit();
+
     public native int receiveStop();
 
     public native int heartBeatInit();
+
     public native int heartBeatStop();
 
     /* Displays a string from C code */
@@ -59,16 +61,42 @@ public class MAVLink {
 
     private void setProgress(short x, short y, short z, short r) {
         /* pitch, roll, thrust, yaw */
-        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar1, x / 20 + 50));
+        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar1, (x + 1000) / 20));
         main.update.updateConversationHandler.post(new UpdateTextThread(main.dutyCycleTextX, Integer.toString(x), false));
 
-        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar2, y / 20 + 50));
+        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar2, (y + 1000) / 20));
         main.update.updateConversationHandler.post(new UpdateTextThread(main.dutyCycleTextY, Integer.toString(y), false));
 
-        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar3, z / 20 + 50));
+        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar3, z / 10));
         main.update.updateConversationHandler.post(new UpdateTextThread(main.dutyCycleTextZ, Integer.toString(z), false));
 
-        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar4, r / 20 + 50));
+        main.update.updateConversationHandler.post(new UpdateProgressThread(main.seekbar4, (r + 1000) / 20));
         main.update.updateConversationHandler.post(new UpdateTextThread(main.dutyCycleTextR, Integer.toString(r), false));
+    }
+
+    private void processButton(short number, boolean status) {
+
+        switch (number) {
+            case 0: {
+                System.out.println(String.format("button", "button: A, status: " + status));
+                main.update.updateConversationHandler.post(new UpdateTextThread(main.textButtons, "button " + number + " " + (status ? "pressed" : "released"), false));
+            }
+            break;
+            case 1: {
+                System.out.println(String.format("button", "button: B, status: " + status));
+                main.update.updateConversationHandler.post(new UpdateTextThread(main.textButtons, "button " + number + " " + (status ? "pressed" : "released"), false));
+            }
+            break;
+            //TODO: process more buttons here
+            /* keep in mind that controllers differ in button layouts */
+            default:
+                System.out.println(String.format("button", "button: " + number + ", status: " + status));
+                main.update.updateConversationHandler.post(new UpdateTextThread(main.textButtons, "button " + number + " " + (status ? "pressed" : "released"), false));
+                break;
+        }
+    }
+
+    private void setSound(int soundID) {
+        main.update.updateConversationHandler.post(new UpdateSoundThread(main, soundID));
     }
 }

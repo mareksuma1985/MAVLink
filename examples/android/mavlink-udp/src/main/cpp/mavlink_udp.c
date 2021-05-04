@@ -82,11 +82,16 @@ bool heartbeat_running = false;
 static pthread_t heartbeat_thread, rcv_thread;
 static pthread_key_t current_jni_env;
 static JavaVM *java_vm;
-static jmethodID set_message_method_id, set_buttons_method_id, set_address_method_id, set_log_method_id, set_progress_method_id;
+static jmethodID set_message_method_id, set_buttons_method_id, set_address_method_id, set_log_method_id, set_progress_method_id, process_button_method_id, set_sound_method_id;
 
 char ground_station_ip[100];
 float hdg = 0;
 int battery_voltage, battery_level;
+
+struct timeval tv;
+long unsigned int last_beat_time, current_time;
+bool communication = false;
+int16_t buttons_before = 0x00;
 
 /** https://stackoverflow.com/questions/111928/is-there-a-printf-converter-to-print-in-binary-format */
 
@@ -199,18 +204,50 @@ static void set_progress(jobject obj, int16_t x, int16_t y, int16_t z, int16_t r
     }
 }
 
+static void process_buttons(jobject obj, int16_t buttons) {
+    JNIEnv *env = get_jni_env();
+    /* compare current button bit field with saved one */
+    if (buttons != buttons_before) {
+        for (int n = 0; n < sizeof(uint16_t) * 8; n++) {
+            /* check if button status has changed */
+            if ((buttons & (1 << n)) != (buttons_before & (1 << n))) {
+                /* check if button is pressed */
+                /** https://en.wikipedia.org/wiki/Bit_field#Extracting_bits_from_flag_words */
+                bool nth_is_set = (buttons & (1 << n)) != 0;
+                (*env)->CallVoidMethod(env, obj, process_button_method_id, n, nth_is_set);
+                if ((*env)->ExceptionCheck(env)) {
+                    printf("Failed to call Java method");
+                    (*env)->ExceptionClear(env);
+                }
+            }
+        }
+    }
+    /* save button bit field for next comparison */
+    buttons_before = buttons;
+}
+
+/** plays a sound */
+static void set_sound(jobject obj, short soundID) {
+    JNIEnv *env = get_jni_env();
+    printf("Playing sound: %d", soundID);
+    (*env)->CallVoidMethod(env, obj, set_sound_method_id, soundID);
+    if ((*env)->ExceptionCheck(env)) {
+        printf("Failed to call Java method");
+        (*env)->ExceptionClear(env);
+    }
+}
+
 static void sendBooleanParameter(char *name, bool value) {
-/** https://mavlink.io/en/services/parameter.html
-  * https://ardupilot.org/dev/docs/mavlink-get-set-params.html
-  */
+  /** https://mavlink.io/en/services/parameter.html
+    * https://ardupilot.org/dev/docs/mavlink-get-set-params.html
+    */
     mavlink_param_union_t param;
     int32_t asInt = value ? 1 : 0;
     param.param_int32 = asInt;
     param.type = MAV_PARAM_TYPE_INT32;
 
     mavlink_message_t msgParameter;
-    mavlink_msg_param_value_pack(system_id, component_id, &msgParameter, name,
-                                 param.param_float, param.type, 1, 0);
+    mavlink_msg_param_value_pack(system_id, component_id, &msgParameter, name, param.param_float, param.type, 1, 0);
     uint16_t len = mavlink_msg_to_send_buffer(buf, &msgParameter);
 
     bytes_sent = sendto(sock, buf, len, 0, (struct sockaddr *) &gcAddr, sizeof(struct sockaddr_in));
@@ -241,6 +278,8 @@ void Java_pl_bezzalogowe_mavlink_MAVLink_classInit(JNIEnv *env, jclass klass) {
     set_address_method_id = (*env)->GetMethodID(env, klass, "setAddress", "(Ljava/lang/String;Z)V");
     set_log_method_id = (*env)->GetMethodID(env, klass, "setLog", "(Ljava/lang/String;)V");
     set_progress_method_id = (*env)->GetMethodID(env, klass, "setProgress", "(SSSS)V");
+    process_button_method_id = (*env)->GetMethodID(env, klass, "processButton", "(SZ)V");
+    set_sound_method_id = (*env)->GetMethodID(env, klass, "setSound", "(I)V");
 }
 
 void Java_pl_bezzalogowe_mavlink_MAVLink_setGroundStationIP(JNIEnv *env, jclass klass, jstring ip) {
@@ -272,21 +311,17 @@ void Java_pl_bezzalogowe_mavlink_MAVLink_sendAttitude(JNIEnv *env, jclass klass,
         //mavlink_msg_attitude_pack(system_id, component_id, &msgAttitude, microsSinceEpoch(), roll * M_PI / 180.0, pitch * M_PI / 180.0, hdg * M_PI / 180.0, 0.00, 0.00, 0.00);
 
         uint16_t len = mavlink_msg_to_send_buffer(buf, &msgAttitude);
-        bytes_sent = sendto(sock, buf, len, 0, (struct sockaddr *) &gcAddr,
-                            sizeof(struct sockaddr_in));
+        bytes_sent = sendto(sock, buf, len, 0, (struct sockaddr *) &gcAddr, sizeof(struct sockaddr_in));
     }
 }
 
-void Java_pl_bezzalogowe_mavlink_MAVLink_setBattery(JNIEnv *env, jclass klass, jint voltage,
-                                                    jint level) {
+void Java_pl_bezzalogowe_mavlink_MAVLink_setBattery(JNIEnv *env, jclass klass, jint voltage, jint level) {
     battery_voltage = voltage;
     battery_level = level;
 }
 
 void
-Java_pl_bezzalogowe_mavlink_MAVLink_sendGlobalPosition(JNIEnv *env, jclass klass,
-                                                       double latitude, double longitude,
-                                                       double altitude) {
+Java_pl_bezzalogowe_mavlink_MAVLink_sendGlobalPosition(JNIEnv *env, jclass klass, double latitude, double longitude, double altitude) {
     if (running) {
         mavlink_message_t msgLocation;
 
@@ -306,8 +341,7 @@ Java_pl_bezzalogowe_mavlink_MAVLink_sendGlobalPosition(JNIEnv *env, jclass klass
 
 /** https://mavlink.io/en/services/mission.html#download_mission */
 /** https://github.com/mavlink/c_library_v1/blob/master/common/mavlink_msg_mission_count.h */
-void sendMissionCount(uint8_t system_id, uint8_t component_id,
-                      mavlink_mission_request_list_t request_list) {
+void sendMissionCount(uint8_t system_id, uint8_t component_id, mavlink_mission_request_list_t request_list) {
     mavlink_message_t msgCount;
     mavlink_msg_mission_count_pack(system_id, component_id, &msgCount, system_id, component_id,
                                    0, request_list.mission_type);
@@ -316,17 +350,24 @@ void sendMissionCount(uint8_t system_id, uint8_t component_id,
     bytes_sent = sendto(sock, buf, len, 0, (struct sockaddr *) &gcAddr, sizeof(struct sockaddr_in));
 }
 
-void processCommandINT(jobject thiz, uint8_t system_id, uint8_t component_id,
-                       mavlink_command_int_t command_int) {
+void processCommandINT(jobject thiz, uint8_t system_id, uint8_t component_id, mavlink_command_int_t command_int) {
     char feedback_ui[64];
     sprintf(feedback_ui, "COMMAND_INT: %d", command_int.command);
     set_ui_message(thiz, feedback_ui, true);
     set_log_message(thiz, feedback_ui);
 }
 
-void processCommandLONG(jobject thiz, uint8_t system_id, uint8_t component_id,
-                        mavlink_command_long_t command_long) {
+void processCommandLONG(jobject thiz, uint8_t system_id, uint8_t component_id, mavlink_command_long_t command_long) {
     switch (command_long.command) {
+		case 203: {
+            /** https://mavlink.io/en/messages/common.html#MAV_CMD_DO_DIGICAM_CONTROL */
+            sendACK(command_long);
+            char feedback_ui[64];
+            sprintf(feedback_ui, "COMMAND_LONG: %d", command_long.command);
+            set_ui_message(thiz, feedback_ui, true);
+
+            set_sound(thiz, 0);
+        }
         case 519: {
             /** https://mavlink.io/en/messages/common.html#MAV_CMD_REQUEST_PROTOCOL_VERSION */
             sendACK(command_long);
@@ -435,6 +476,18 @@ int *receiveFunction(jobject thiz) {
                             char feedback_ui[64];
                             sprintf(feedback_ui, "%s", inet_ntoa(gcAddr.sin_addr));
                             set_ui_message_address(thiz, feedback_ui, true);
+
+                            gettimeofday(&tv, NULL);
+                            last_beat_time = (tv.tv_sec % 1000000) * 1000 + tv.tv_usec / 1000;
+
+                            if (communication == false)
+                            {
+                                /* communication regained */
+                                communication = true;
+                                set_ui_message(thiz, "communication regained", true);
+                                set_log_message(thiz, "communication regained");
+                                set_sound(thiz,1);
+                            }
                         }
                             break;
                         case 2: {
@@ -491,30 +544,22 @@ int *receiveFunction(jobject thiz) {
                             mavlink_manual_control_t manual_control;
                             mavlink_msg_manual_control_decode(&rcv_msg, &manual_control);
 
-                            char feedback_ui[128];
-                            char buttons[64];
 
-                            /** displays bit field representing pressed buttons */
-                            sprintf(buttons, BYTE_TO_BINARY_PATTERN BYTE_TO_BINARY_PATTERN,
-                                    BYTE_TO_BINARY(manual_control.buttons >> 8),
-                                    BYTE_TO_BINARY(manual_control.buttons));
 
                             /** sets positions of seekbars representing joystick/gamepad axes */
-                            set_progress(thiz, manual_control.x, manual_control.y,
-                                         manual_control.z, manual_control.r);
+                            set_progress(thiz, manual_control.x, manual_control.y, manual_control.z, manual_control.r);
+
                             /*
-                            sprintf(feedback_ui, "axes: X: %d, Y: %d, Z: %d, R: %d\r\nbuttons: %s",
-                            manual_control.x, manual_control.y, manual_control.z, manual_control.r, buttons);
-                            */
+                            char feedback_ui[128];
+                            char buttons[64];
+                            sprintf(buttons, BYTE_TO_BINARY_PATTERN BYTE_TO_BINARY_PATTERN,
+                            BYTE_TO_BINARY(manual_control.buttons >> 8),
+                            BYTE_TO_BINARY(manual_control.buttons));
                             sprintf(feedback_ui, "buttons: %s", buttons);
                             set_ui_message_buttons(thiz, feedback_ui, true);
-                            /*
-                            sprintf(feedback,
-                                    "MSG ID: MANUAL_CONTROL, X: %d, Y: %d, Z: %d, R: %d, buttons: %s",
-                                    manual_control.x, manual_control.y,
-                                    manual_control.z, manual_control.r, buttons);
-                            set_log_message(thiz, feedback);
                             */
+
+                            process_buttons(thiz, manual_control.buttons);
                         }
                             break;
                         case 75: {
@@ -593,6 +638,19 @@ int *heartbeatFunction(jobject thiz) {
                     set_log_message(thiz, feedback);
                 }
             }
+
+            gettimeofday(&tv, NULL);
+            current_time = (tv.tv_sec % 1000000) * 1000 + tv.tv_usec / 1000;
+
+            if (communication && (current_time > last_beat_time + 1999))
+            {
+                /* communication lost */
+                communication = false;
+                set_ui_message(thiz, "communication lost", true);
+                set_log_message(thiz, "communication lost");
+                set_sound(thiz,2);
+            }
+
         } else {
             char feedback[128];
             sprintf(feedback, "no messages from ground control station yet");
@@ -619,8 +677,7 @@ jint Java_pl_bezzalogowe_mavlink_MAVLink_receiveStop(JNIEnv *env, jobject thiz) 
     pthread_join(rcv_thread, NULL);
 }
 
-jint Java_pl_bezzalogowe_mavlink_MAVLink_setIDs(JNIEnv *env, jobject thiz, jbyte arg_system,
-                                                jbyte arg_component) {
+jint Java_pl_bezzalogowe_mavlink_MAVLink_setIDs(JNIEnv *env, jobject thiz, jbyte arg_system, jbyte arg_component) {
     system_id = arg_system;
     component_id = arg_component;
 
@@ -629,8 +686,9 @@ jint Java_pl_bezzalogowe_mavlink_MAVLink_setIDs(JNIEnv *env, jobject thiz, jbyte
 
 jint Java_pl_bezzalogowe_mavlink_MAVLink_heartBeatInit(JNIEnv *env, jobject thiz) {
     jobject *data = (*env)->NewGlobalRef(env, thiz);
+    /* communication established */
     heartbeat_running = true;
-
+    communication = true;
     pthread_create(&heartbeat_thread, NULL, &heartbeatFunction, data);
     return 0;
 }

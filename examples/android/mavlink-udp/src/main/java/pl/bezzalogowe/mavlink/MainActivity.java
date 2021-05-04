@@ -193,6 +193,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     address_host.setText("-.-.-.-");
                     address_host.setGravity(0x00800005);
                 }
+
+                main.update.updateConversationHandler.post(new UpdateSoundThread(main, 1));
             }
         });
 
@@ -204,6 +206,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
                 stopServer.setVisibility(View.GONE);
                 startServer.setVisibility(View.VISIBLE);
+
+                main.update.updateConversationHandler.post(new UpdateSoundThread(main, 2));
             }
         });
 
@@ -286,6 +290,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     }
                 }
                 break;
+            case R.id.other_apps:
+                openOtherAppsPage();
+                return true;
             case R.id.source_code:
                 openSourceCodePage();
                 break;
@@ -310,7 +317,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         component_id_value.setText(Integer.toString(component_id));
     }
 
-/* saves remote address in preferences */
+    /* saves remote address in preferences */
 /*
     private void saveReceiverIP() {
         final EditText addressEditText = (EditText) this.findViewById(R.id.gcs_address);
@@ -331,8 +338,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         ActivityCompat.requestPermissions(this, permissions, requestCode);
     }
 
+    public void openOtherAppsPage() {
+        Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/developer?id=bezzalogowe.pl"));
+        startActivity(browserIntent);
+    }
+
     public void openSourceCodePage() {
-        Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mavlink/mavlink/tree/master/examples/android"));
+        Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mareksuma1985/mavlink"));
         startActivity(browserIntent);
     }
 
@@ -402,7 +414,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         helpDialog.show();
     }
 
-    /** https://developer.android.com/guide/topics/resources/runtime-changes.html */
+    /**
+     * https://developer.android.com/guide/topics/resources/runtime-changes.html
+     */
     /* prevents app from crashing when screen is rotated */
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
